@@ -2,10 +2,8 @@ import { Response } from 'express'
 import { Challenge, Submission } from '../models'
 import { success, error } from '../utils/jsend'
 import { AuthRequest } from '../middlewares/auth.middleware'
-
-// Dummy execution configuration
-const DUMMY_TEST_PASS_RATE = 0.7 // 70% pass rate for demo purposes
-
+import axios from 'axios'
+import { verifyJudge0Languages } from '../utils/judge0-mapper'
 /**
  * Execute code and return results (dummy implementation)
  *
@@ -48,7 +46,10 @@ const DUMMY_TEST_PASS_RATE = 0.7 // 70% pass rate for demo purposes
 export const runCode = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { challengeId, code, language } = req.body
-
+    if (!challengeId) {
+      res.status(400).json(error('Challenge ID is required', 'VALIDATION_ERROR'))
+      return
+    }
     if (!code) {
       res.status(400).json(error('Code is required', 'VALIDATION_ERROR'))
       return
@@ -58,71 +59,94 @@ export const runCode = async (req: AuthRequest, res: Response): Promise<void> =>
       res.status(400).json(error('Language is required', 'VALIDATION_ERROR'))
       return
     }
+    const normalizedLanguage = String(language || '').toLowerCase()
 
-    // Validate language
-    const validLanguages = ['python', 'cpp', 'java', 'javascript', 'typescript', 'go', 'rust']
-    if (!validLanguages.includes(language)) {
-      res.status(400).json(error('Invalid language', 'VALIDATION_ERROR'))
+    // Validate Challenge
+    const challenge = await Challenge.findById(challengeId)
+    if (!challenge) {
+      res.status(404).json(error('Challenge Not Found', 'NOT_FOUND'))
       return
     }
-
-    // Dummy execution logic
-    // In production, this would integrate with a code execution service
-    let status = 'PASS'
-    let stdout = ''
-    let stderr = null
-
-    // Simple validation - check if code is not empty
-    if (code.trim().length === 0) {
-      status = 'ERROR'
-      stderr = 'Empty code submission'
-    } else {
-      // Simulate successful execution
-      stdout = 'Code executed successfully\n'
-
-      // If there's a challengeId, validate against test cases (dummy)
-      if (challengeId) {
-        const challenge = await Challenge.findById(challengeId)
-        if (challenge) {
-          // Dummy test case validation
-          // In production, this would run actual tests
-          const testsPassed = Math.random() < DUMMY_TEST_PASS_RATE
-
-          if (testsPassed) {
-            status = 'PASS'
-            stdout += 'All test cases passed!\n'
-          } else {
-            status = 'FAIL'
-            stdout += 'Test case 1: Expected "Hello" but got "Hello World"\n'
-          }
-        }
-      }
+    const testcases = challenge.testCases.filter(el => el.isHidden === false)
+    if (!testcases || testcases.length === 0) {
+      res.status(400).json(error('Challenge has no public test cases', 'VALIDATION_ERROR'))
+      return
     }
-
-    // Save submission if user is authenticated and challenge exists
-    if (req.user && challengeId) {
-      await Submission.create({
-        userId: req.user.id,
-        challengeId,
-        userCode: code,
-        language,
-        outputLog: stdout + (stderr || ''),
-        status: status === 'PASS' ? 'PASSED' : status === 'FAIL' ? 'FAILED' : 'FAILED',
-        metrics: {
-          runtime: `${(Math.random() * 0.1).toFixed(2)}s`,
-          memoryUsed: `${Math.floor(Math.random() * 1024)}KB`
-        }
+    // Validate language
+    const url: string = process.env.JUDGE0_DASHBOARD || 'http://localhost:2358'
+    const judge0Languages = await verifyJudge0Languages(url)
+    const lang = judge0Languages.find((el: any) => el.name?.toLowerCase() === normalizedLanguage)
+    if (!lang) {
+      res.status(404).json(error('Language Not Found', 'NOT_FOUND'))
+      return
+    }
+    // Execute against all public test cases via Judge0
+    const judge0Results = await Promise.all(
+      testcases.map(async testCase => {
+        const response = await axios.post(`${url}/submissions?wait=true`, {
+          source_code: code,
+          language_id: lang.id,
+          expected_output: testCase.expectedOutput,
+          stdin: testCase.input
+        })
+        return response.data
       })
+    )
+
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+    let passedCount = 0
+    let maxTime = 0
+    let maxMemory = 0
+
+    judge0Results.forEach((result: any, index: number) => {
+      const statusId = result.status?.id
+      const statusDescription = result.status?.description || 'Unknown'
+      const stdoutText = result.stdout || ''
+      const stderrText = result.stderr || ''
+      const compileOutput = result.compile_output || ''
+      const messageOutput = result.message || ''
+
+      if (statusId === 3) {
+        passedCount += 1
+      }
+
+      const timeValue = parseFloat(result.time || '0')
+      if (!Number.isNaN(timeValue)) {
+        maxTime = Math.max(maxTime, timeValue)
+      }
+
+      const memoryValue = Number(result.memory || 0)
+      if (!Number.isNaN(memoryValue)) {
+        maxMemory = Math.max(maxMemory, memoryValue)
+      }
+
+      stdoutLines.push(`Test case ${index + 1}: ${statusDescription}\n${stdoutText}`.trim())
+
+      const stderrParts = [stderrText, compileOutput, messageOutput].filter(Boolean)
+      if (stderrParts.length > 0) {
+        stderrLines.push(
+          `Test case ${index + 1}: ${statusDescription}\n${stderrParts.join('\n')}`.trim()
+        )
+      }
+    })
+
+    const allPassed = passedCount === judge0Results.length
+    const stdout = stdoutLines.join('\n\n')
+    const stderr = stderrLines.length > 0 ? stderrLines.join('\n\n') : null
+    const metrics = {
+      runtime: `${maxTime.toFixed(3)}s`,
+      memoryUsed: `${maxMemory}KB`,
+      passed: passedCount,
+      total: judge0Results.length
     }
 
     res.status(200).json(
       success({
-        status,
+        status: allPassed ? 'PASSED' : 'FAILED',
         stdout,
         stderr,
-        metrics: {
-          runtime: `${(Math.random() * 0.1).toFixed(2)}s`
-        }
+        metrics
       })
     )
   } catch (err) {
@@ -256,13 +280,14 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
       res.status(400).json(error('Language is required', 'VALIDATION_ERROR'))
       return
     }
+    const normalizedLanguage = String(language || '').toLowerCase()
 
     // Validate language
-    const validLanguages = ['python', 'cpp', 'java', 'javascript', 'typescript', 'go', 'rust']
-    if (!validLanguages.includes(language)) {
-      res.status(400).json(error('Invalid language', 'VALIDATION_ERROR'))
-      return
-    }
+    // const validLanguages = ['python', 'cpp', 'java', 'javascript', 'typescript', 'go', 'rust']
+    // if (!validLanguages.includes(normalizedLanguage)) {
+    //   res.status(400).json(error('Invalid language', 'VALIDATION_ERROR'))
+    //   return
+    // }
 
     // Verify challenge exists
     const challenge = await Challenge.findById(challengeId)
@@ -272,35 +297,88 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
     }
 
     // Verify the language has starter code for this challenge
-    if (!challenge.starterCodes[language as keyof typeof challenge.starterCodes]) {
-      res.status(400).json(error(`This challenge does not support ${language}`, 'VALIDATION_ERROR'))
+    if (!challenge.starterCodes[normalizedLanguage as keyof typeof challenge.starterCodes]) {
+      res
+        .status(400)
+        .json(error(`This challenge does not support ${normalizedLanguage}`, 'VALIDATION_ERROR'))
       return
     }
 
-    // Execute the code (dummy implementation)
-    let status = 'PASS'
-    let stdout = ''
-    let stderr = null
+    if (!challenge.testCases || challenge.testCases.length === 0) {
+      res.status(400).json(error('Challenge has no test cases', 'VALIDATION_ERROR'))
+      return
+    }
 
-    // Simple validation - check if code is not empty
-    if (code.trim().length === 0) {
-      status = 'ERROR'
-      stderr = 'Empty code submission'
-    } else {
-      // Simulate successful execution
-      stdout = 'Code executed successfully\n'
+    // Validate language with Judge0
+    const url: string = process.env.JUDGE0_DASHBOARD || 'http://localhost:2358'
+    const judge0Languages = await verifyJudge0Languages(url)
+    const judge0Lang = judge0Languages.find(
+      (el: any) => el.name?.toLowerCase() === normalizedLanguage
+    )
+    if (!judge0Lang) {
+      res.status(404).json(error('Language Not Found', 'NOT_FOUND'))
+      return
+    }
 
-      // Dummy test case validation
-      // In production, this would run actual tests
-      const testsPassed = Math.random() < DUMMY_TEST_PASS_RATE
+    // Execute against all test cases via Judge0
+    const judge0Results = await Promise.all(
+      challenge.testCases.map(async testCase => {
+        const response = await axios.post(`${url}/submissions?wait=true`, {
+          source_code: code,
+          language_id: judge0Lang.id,
+          expected_output: testCase.expectedOutput,
+          stdin: testCase.input
+        })
+        return response.data
+      })
+    )
 
-      if (testsPassed) {
-        status = 'PASS'
-        stdout += 'All test cases passed!\n'
-      } else {
-        status = 'FAIL'
-        stdout += 'Test case 1: Expected "Hello" but got "Hello World"\n'
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+    let passedCount = 0
+    let maxTime = 0
+    let maxMemory = 0
+
+    judge0Results.forEach((result: any, index: number) => {
+      const statusId = result.status?.id
+      const statusDescription = result.status?.description || 'Unknown'
+      const stdoutText = result.stdout || ''
+      const stderrText = result.stderr || ''
+      const compileOutput = result.compile_output || ''
+      const messageOutput = result.message || ''
+
+      if (statusId === 3) {
+        passedCount += 1
       }
+
+      const timeValue = parseFloat(result.time || '0')
+      if (!Number.isNaN(timeValue)) {
+        maxTime = Math.max(maxTime, timeValue)
+      }
+
+      const memoryValue = Number(result.memory || 0)
+      if (!Number.isNaN(memoryValue)) {
+        maxMemory = Math.max(maxMemory, memoryValue)
+      }
+
+      stdoutLines.push(`Test case ${index + 1}: ${statusDescription}\n${stdoutText}`.trim())
+
+      const stderrParts = [stderrText, compileOutput, messageOutput].filter(Boolean)
+      if (stderrParts.length > 0) {
+        stderrLines.push(
+          `Test case ${index + 1}: ${statusDescription}\n${stderrParts.join('\n')}`.trim()
+        )
+      }
+    })
+
+    const allPassed = passedCount === judge0Results.length
+    const stdout = stdoutLines.join('\n\n')
+    const stderr = stderrLines.length > 0 ? stderrLines.join('\n\n') : null
+    const metrics = {
+      runtime: `${maxTime.toFixed(3)}s`,
+      memoryUsed: `${maxMemory}KB`,
+      passed: passedCount,
+      total: judge0Results.length
     }
 
     // Save the submission
@@ -308,13 +386,10 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
       userId: req.user.id,
       challengeId,
       userCode: code,
-      language,
-      outputLog: stdout + (stderr || ''),
-      status: status === 'PASS' ? 'PASSED' : status === 'FAIL' ? 'FAILED' : 'FAILED',
-      metrics: {
-        runtime: `${(Math.random() * 0.1).toFixed(2)}s`,
-        memoryUsed: `${Math.floor(Math.random() * 1024)}KB`
-      }
+      language: normalizedLanguage,
+      outputLog: [stdout, stderr].filter(Boolean).join('\n\n'),
+      status: allPassed ? 'PASSED' : 'FAILED',
+      metrics
     })
 
     // Return the execution results along with the submission ID
