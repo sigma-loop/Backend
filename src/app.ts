@@ -1,21 +1,46 @@
 import express, { Application, Request, Response, NextFunction } from 'express'
-import cors from 'cors'
 import routes from './routes'
 import { error } from './utils/jsend'
 
 const app: Application = express()
 
-// Middleware
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-  })
-)
+// CORS middleware (manual — cors@2.8.x doesn't set Access-Control-Allow-Origin with Express 5)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin
+  res.setHeader('X-Debug-Origin', origin || 'none')
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type,Authorization,X-Requested-With,Accept'
+  )
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+  next()
+})
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// Request logger
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now()
+  const { method, originalUrl } = req
+
+  res.on('finish', () => {
+    const duration = Date.now() - start
+    const status = res.statusCode
+    const color = status >= 500 ? '\x1b[31m' : status >= 400 ? '\x1b[33m' : '\x1b[32m'
+    const reset = '\x1b[0m'
+    console.log(`${color}${method} ${originalUrl} ${status}${reset} ${duration}ms`)
+  })
+
+  next()
+})
 
 // Routes
 app.use('/api', routes)
