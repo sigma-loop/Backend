@@ -6,6 +6,7 @@ import courseRoutes from './course.routes'
 import lessonRoutes from './lesson.routes'
 import challengeRoutes from './challenge.routes'
 import executionRoutes from './execution.routes'
+import chatRoutes from './chat.routes'
 
 const router = Router()
 
@@ -16,5 +17,6 @@ router.use('/v1/courses', courseRoutes)
 router.use('/v1/lessons', lessonRoutes)
 router.use('/v1/challenges', challengeRoutes)
 router.use('/v1/execution', executionRoutes)
+router.use('/v1/chat', chatRoutes)
 
 export default router
