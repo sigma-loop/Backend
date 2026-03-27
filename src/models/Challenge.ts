@@ -21,6 +21,7 @@ export interface IChallenge extends Document {
   title: string
   starterCodes: IStarterCodes
   solutionCodes: IStarterCodes
+  injectedCodes: IStarterCodes
   testCases: ITestCase[]
 }
 
@@ -72,6 +73,18 @@ const ChallengeSchema = new Schema<IChallenge>({
       },
       message: 'At least one solution code language must be provided'
     }
+  },
+  injectedCodes: {
+    type: {
+      python: { type: String },
+      cpp: { type: String },
+      java: { type: String },
+      javascript: { type: String },
+      typescript: { type: String },
+      go: { type: String },
+      rust: { type: String }
+    },
+    default: {}
   },
   testCases: {
     type: [

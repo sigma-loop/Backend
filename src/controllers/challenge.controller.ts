@@ -25,15 +25,21 @@ export const getChallengeById = async (req: AuthRequest, res: Response): Promise
       ? challenge.testCases
       : challenge.testCases.filter(tc => !tc.isHidden)
 
-    res.status(200).json(
-      success({
-        id: challenge._id.toString(),
-        lessonId: challenge.lessonId.toString(),
-        title: challenge.title,
-        starterCodes: challenge.starterCodes,
-        testCases: filteredTestCases
-      })
-    )
+    const responseData: any = {
+      id: challenge._id.toString(),
+      lessonId: challenge.lessonId.toString(),
+      title: challenge.title,
+      starterCodes: challenge.starterCodes,
+      testCases: filteredTestCases
+    }
+
+    // Only admins/instructors can see injected and solution codes
+    if (isAdminOrInstructor) {
+      responseData.solutionCodes = challenge.solutionCodes
+      responseData.injectedCodes = challenge.injectedCodes || {}
+    }
+
+    res.status(200).json(success(responseData))
   } catch (err) {
     console.error('Get challenge error:', err)
     res.status(500).json(error('Failed to get challenge', 'INTERNAL_ERROR'))
@@ -45,7 +51,7 @@ export const getChallengeById = async (req: AuthRequest, res: Response): Promise
  */
 export const createChallenge = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { lessonId, title, starterCodes, solutionCodes, testCases } = req.body
+    const { lessonId, title, starterCodes, solutionCodes, injectedCodes, testCases } = req.body
 
     if (!lessonId || !title || !starterCodes || !solutionCodes) {
       res
@@ -71,6 +77,7 @@ export const createChallenge = async (req: AuthRequest, res: Response): Promise<
       title,
       starterCodes,
       solutionCodes,
+      injectedCodes: injectedCodes || {},
       testCases: testCases || []
     })
 
@@ -92,7 +99,7 @@ export const createChallenge = async (req: AuthRequest, res: Response): Promise<
 export const updateChallenge = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { challengeId } = req.params
-    const { title, starterCodes, solutionCodes, testCases } = req.body
+    const { title, starterCodes, solutionCodes, injectedCodes, testCases } = req.body
 
     const challenge = await Challenge.findByIdAndUpdate(
       challengeId,
@@ -100,6 +107,7 @@ export const updateChallenge = async (req: AuthRequest, res: Response): Promise<
         ...(title && { title }),
         ...(starterCodes && { starterCodes }),
         ...(solutionCodes && { solutionCodes }),
+        ...(injectedCodes !== undefined && { injectedCodes }),
         ...(testCases && { testCases })
       },
       { new: true }
