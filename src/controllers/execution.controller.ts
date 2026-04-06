@@ -1,5 +1,5 @@
 import { Response } from 'express'
-import { Challenge, Submission, LessonProgress, User } from '../models'
+import { Challenge, Submission, LessonProgress, User, GeneratedChallenge } from '../models'
 import { success, error } from '../utils/jsend'
 import { AuthRequest } from '../middlewares/auth.middleware'
 import axios from 'axios'
@@ -45,8 +45,8 @@ import { getJudge0LanguageId } from '../utils/judge0-mapper'
  */
 export const runCode = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { challengeId, code, language } = req.body
-    console.log('[RUN] Input:', { challengeId, language, codeLength: code?.length })
+    const { challengeId, code, language, generated } = req.body
+    console.log('[RUN] Input:', { challengeId, language, generated, codeLength: code?.length })
 
     if (!challengeId) {
       res.status(400).json(error('Challenge ID is required', 'VALIDATION_ERROR'))
@@ -63,14 +63,16 @@ export const runCode = async (req: AuthRequest, res: Response): Promise<void> =>
     }
     const normalizedLanguage = String(language || '').toLowerCase()
 
-    // Validate Challenge
-    const challenge = await Challenge.findById(challengeId)
+    // Look up challenge from the right collection
+    const challenge = generated
+      ? await GeneratedChallenge.findById(challengeId)
+      : await Challenge.findById(challengeId)
     if (!challenge) {
       console.log('[RUN] Challenge not found:', challengeId)
       res.status(404).json(error('Challenge Not Found', 'NOT_FOUND'))
       return
     }
-    console.log('[RUN] Challenge:', challenge.title)
+    console.log('[RUN] Challenge:', challenge.title, generated ? '(generated)' : '')
 
     const testcases = challenge.testCases.filter(el => el.isHidden === false)
     if (!testcases || testcases.length === 0) {
@@ -87,9 +89,10 @@ export const runCode = async (req: AuthRequest, res: Response): Promise<void> =>
     }
     const url: string = process.env.JUDGE0_DASHBOARD || 'http://localhost:2358'
 
-    // Combine user code with injected wrapper code
-    const injected =
-      challenge.injectedCodes?.[normalizedLanguage as keyof typeof challenge.injectedCodes] || ''
+    // Combine user code with injected wrapper code (only regular challenges have injected codes)
+    const injected = !generated
+      ? (challenge as any).injectedCodes?.[normalizedLanguage as string] || ''
+      : ''
     const sourceCode = injected ? `${code}\n${injected}` : code
     console.log(
       '[RUN] Judge0 URL:',
@@ -290,11 +293,12 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
       return
     }
 
-    const { challengeId, code, language } = req.body
+    const { challengeId, code, language, generated } = req.body
     console.log('[SUBMIT] Input:', {
       userId: req.user.id,
       challengeId,
       language,
+      generated,
       codeLength: code?.length
     })
 
@@ -315,14 +319,16 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
     }
     const normalizedLanguage = String(language || '').toLowerCase()
 
-    // Verify challenge exists
-    const challenge = await Challenge.findById(challengeId)
+    // Verify challenge exists (from the right collection)
+    const challenge = generated
+      ? await GeneratedChallenge.findById(challengeId)
+      : await Challenge.findById(challengeId)
     if (!challenge) {
       console.log('[SUBMIT] Challenge not found:', challengeId)
       res.status(404).json(error('Challenge not found', 'NOT_FOUND'))
       return
     }
-    console.log('[SUBMIT] Challenge:', challenge.title)
+    console.log('[SUBMIT] Challenge:', challenge.title, generated ? '(generated)' : '')
 
     // Verify the language has starter code for this challenge
     if (!challenge.starterCodes[normalizedLanguage as keyof typeof challenge.starterCodes]) {
@@ -348,9 +354,10 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
     }
     const url: string = process.env.JUDGE0_DASHBOARD || 'http://localhost:2358'
 
-    // Combine user code with injected wrapper code
-    const injected =
-      challenge.injectedCodes?.[normalizedLanguage as keyof typeof challenge.injectedCodes] || ''
+    // Combine user code with injected wrapper code (only regular challenges)
+    const injected = !generated
+      ? (challenge as any).injectedCodes?.[normalizedLanguage as string] || ''
+      : ''
     const sourceCode = injected ? `${code}\n${injected}` : code
     console.log(
       '[SUBMIT] Judge0 URL:',
@@ -452,10 +459,10 @@ export const submitChallenge = async (req: AuthRequest, res: Response): Promise<
       ...metrics
     })
 
-    // Mark lesson as complete if all tests passed
+    // Mark lesson as complete if all tests passed (only for regular challenges)
     let lessonCompleted = false
-    if (allPassed) {
-      const lessonId = challenge.lessonId
+    if (allPassed && !generated) {
+      const lessonId = (challenge as any).lessonId
       const existingProgress = await LessonProgress.findOne({
         userId: req.user.id,
         lessonId
