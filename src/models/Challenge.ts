@@ -19,6 +19,7 @@ export interface ITestCase {
 export interface IChallenge extends Document {
   lessonId: mongoose.Types.ObjectId
   title: string
+  description: string
   starterCodes: IStarterCodes
   solutionCodes: IStarterCodes
   injectedCodes: IStarterCodes
@@ -35,6 +36,10 @@ const ChallengeSchema = new Schema<IChallenge>({
     type: String,
     required: true,
     trim: true
+  },
+  description: {
+    type: String,
+    default: ''
   },
   starterCodes: {
     type: {

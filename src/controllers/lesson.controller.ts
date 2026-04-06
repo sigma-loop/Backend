@@ -46,6 +46,7 @@ export const getLessonById = async (req: AuthRequest, res: Response): Promise<vo
       (lesson.challengeIds as any[])?.map((challenge: any) => ({
         id: challenge._id.toString(),
         title: challenge.title,
+        description: challenge.description || '',
         starterCodes: challenge.starterCodes,
         testCases: challenge.testCases.filter((tc: any) => !tc.isHidden)
       })) || []

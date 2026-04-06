@@ -29,6 +29,7 @@ export const getChallengeById = async (req: AuthRequest, res: Response): Promise
       id: challenge._id.toString(),
       lessonId: challenge.lessonId.toString(),
       title: challenge.title,
+      description: challenge.description || '',
       starterCodes: challenge.starterCodes,
       testCases: filteredTestCases
     }
@@ -51,7 +52,8 @@ export const getChallengeById = async (req: AuthRequest, res: Response): Promise
  */
 export const createChallenge = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { lessonId, title, starterCodes, solutionCodes, injectedCodes, testCases } = req.body
+    const { lessonId, title, description, starterCodes, solutionCodes, injectedCodes, testCases } =
+      req.body
 
     if (!lessonId || !title || !starterCodes || !solutionCodes) {
       res
@@ -75,6 +77,7 @@ export const createChallenge = async (req: AuthRequest, res: Response): Promise<
     const challenge = await Challenge.create({
       lessonId,
       title,
+      description: description || '',
       starterCodes,
       solutionCodes,
       injectedCodes: injectedCodes || {},
@@ -99,12 +102,13 @@ export const createChallenge = async (req: AuthRequest, res: Response): Promise<
 export const updateChallenge = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { challengeId } = req.params
-    const { title, starterCodes, solutionCodes, injectedCodes, testCases } = req.body
+    const { title, description, starterCodes, solutionCodes, injectedCodes, testCases } = req.body
 
     const challenge = await Challenge.findByIdAndUpdate(
       challengeId,
       {
         ...(title && { title }),
+        ...(description !== undefined && { description }),
         ...(starterCodes && { starterCodes }),
         ...(solutionCodes && { solutionCodes }),
         ...(injectedCodes !== undefined && { injectedCodes }),
