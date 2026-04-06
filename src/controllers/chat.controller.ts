@@ -1,208 +1,84 @@
 import { Response } from 'express'
-import { ChatThread, ChatMessage } from '../models'
+import { ChatThread, ChatMessage, Lesson, Course } from '../models'
+import { ChatScope } from '../models/ChatThread'
 import { SenderRole } from '../models/ChatMessage'
 import { success, error } from '../utils/jsend'
 import { AuthRequest } from '../middlewares/auth.middleware'
+import { aiService, ChatMessage as AIChatMessage } from '../services/ai.service'
+import { AI_NOT_CONFIGURED } from '../constants'
 
-const PLACEHOLDER_RESPONSES = [
-  `Great question! Here's how you can implement a **binary search** in Python:
+// ──────────────────────────────────────────
+// System prompt builders
+// ──────────────────────────────────────────
 
-\`\`\`python
-def binary_search(arr, target):
-    left, right = 0, len(arr) - 1
-    while left <= right:
-        mid = (left + right) // 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-    return -1
-\`\`\`
+function buildGeneralSystemPrompt(): string {
+  return `You are SigmaLoop, an AI programming mentor on the SigmaLoop educational platform. You help students learn programming concepts, algorithms, data structures, and software development.
 
-The time complexity is $O(\\log n)$ and space complexity is $O(1)$.`,
-
-  `## Understanding Big-O Notation
-
-Big-O describes the **upper bound** of an algorithm's growth rate. Here are the most common complexities:
-
-| Complexity | Name | Example |
-|-----------|------|---------|
-| $O(1)$ | Constant | Hash table lookup |
-| $O(\\log n)$ | Logarithmic | Binary search |
-| $O(n)$ | Linear | Array traversal |
-| $O(n \\log n)$ | Linearithmic | Merge sort |
-| $O(n^2)$ | Quadratic | Bubble sort |
-
-> **Tip:** Always aim for the lowest complexity possible, but remember that constants matter for small inputs!`,
-
-  `The **quadratic formula** is useful in many algorithmic contexts. Given $ax^2 + bx + c = 0$, the solution is:
-
-$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$
-
-Here's how you'd implement it in TypeScript:
-
-\`\`\`typescript
-function solveQuadratic(a: number, b: number, c: number): [number, number] | null {
-  const discriminant = b * b - 4 * a * c;
-  if (discriminant < 0) return null;
-  const sqrtD = Math.sqrt(discriminant);
-  return [(-b + sqrtD) / (2 * a), (-b - sqrtD) / (2 * a)];
-}
-\`\`\`
-
-The discriminant $\\Delta = b^2 - 4ac$ tells us:
-- If $\\Delta > 0$: two real roots
-- If $\\Delta = 0$: one repeated root
-- If $\\Delta < 0$: no real roots`,
-
-  `## React Hooks Cheat Sheet
-
-Here are the most common hooks you'll use:
-
-### \`useState\`
-\`\`\`jsx
-const [count, setCount] = useState(0);
-\`\`\`
-
-### \`useEffect\`
-\`\`\`jsx
-useEffect(() => {
-  document.title = \`Count: \${count}\`;
-  return () => {
-    // cleanup function
-  };
-}, [count]);
-\`\`\`
-
-### \`useMemo\`
-\`\`\`jsx
-const expensiveValue = useMemo(() => {
-  return computeExpensiveValue(a, b);
-}, [a, b]);
-\`\`\`
-
-**Rules of Hooks:**
-1. Only call hooks at the **top level** — never inside loops or conditions
-2. Only call hooks from **React functions** — not regular JS functions
-3. Custom hooks must start with \`use\``,
-
-  `Let me explain **recursion** with the classic Fibonacci example.
-
-The mathematical definition is:
-
-$$F(n) = \\begin{cases} 0 & \\text{if } n = 0 \\\\ 1 & \\text{if } n = 1 \\\\ F(n-1) + F(n-2) & \\text{if } n > 1 \\end{cases}$$
-
-The naive recursive approach has $O(2^n)$ time complexity:
-
-\`\`\`python
-def fib(n):
-    if n <= 1:
-        return n
-    return fib(n - 1) + fib(n - 2)
-\`\`\`
-
-But with **memoization**, we can bring it down to $O(n)$:
-
-\`\`\`python
-from functools import lru_cache
-
-@lru_cache(maxsize=None)
-def fib(n):
-    if n <= 1:
-        return n
-    return fib(n - 1) + fib(n - 2)
-\`\`\`
-
-> Always look for overlapping subproblems — that's the hallmark of dynamic programming!`,
-
-  `Here's a quick guide to **SQL JOINs**:
-
-\`\`\`sql
--- INNER JOIN: only matching rows
-SELECT users.name, orders.total
-FROM users
-INNER JOIN orders ON users.id = orders.user_id;
-
--- LEFT JOIN: all left rows + matching right
-SELECT users.name, COALESCE(orders.total, 0) as total
-FROM users
-LEFT JOIN orders ON users.id = orders.user_id;
-\`\`\`
-
-The key relationships:
-- **One-to-Many**: A user has many orders
-- **Many-to-Many**: Students ↔ Courses (via enrollment table)
-- **One-to-One**: User ↔ Profile
-
-Remember: \`INNER JOIN\` filters out non-matching rows, while \`LEFT JOIN\` keeps all rows from the left table.`,
-
-  `## Sorting Algorithm Comparison
-
-The sum of the first $n$ natural numbers is $\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$, which is why simple nested loops give us $O(n^2)$.
-
-Here's **merge sort** in Go — a classic $O(n \\log n)$ algorithm:
-
-\`\`\`go
-func mergeSort(arr []int) []int {
-    if len(arr) <= 1 {
-        return arr
-    }
-    mid := len(arr) / 2
-    left := mergeSort(arr[:mid])
-    right := mergeSort(arr[mid:])
-    return merge(left, right)
+Rules:
+1. Provide clear, educational explanations.
+2. Use code examples with proper syntax highlighting (use Markdown code blocks with language identifiers).
+3. Support mathematical notation using LaTeX ($inline$ and $$block$$).
+4. Be encouraging and patient.
+5. Cover any programming topic the student asks about.`
 }
 
-func merge(left, right []int) []int {
-    result := make([]int, 0, len(left)+len(right))
-    i, j := 0, 0
-    for i < len(left) && j < len(right) {
-        if left[i] <= right[j] {
-            result = append(result, left[i])
-            i++
-        } else {
-            result = append(result, right[j])
-            j++
-        }
-    }
-    result = append(result, left[i:]...)
-    result = append(result, right[j:]...)
-    return result
+async function buildLessonSystemPrompt(lessonId: string): Promise<string> {
+  const lesson = await Lesson.findById(lessonId).lean()
+  if (!lesson) return buildGeneralSystemPrompt()
+
+  const content =
+    lesson.contentMarkdown.length > 8000
+      ? lesson.contentMarkdown.slice(0, 8000) + '\n\n(content truncated)'
+      : lesson.contentMarkdown
+
+  return `You are a lesson assistant for the SigmaLoop educational platform. You are helping a student understand the following lesson:
+
+**Lesson Title:** ${lesson.title}
+
+**Lesson Content:**
+${content}
+
+---
+
+Rules:
+1. Only answer questions directly related to the lesson content above.
+2. If the student asks about a topic not covered in this lesson, politely say: "That topic isn't covered in this lesson. Try asking the course mentor on the course page, or the general mentor."
+3. Use examples and explanations that build on the lesson content.
+4. Format your responses with Markdown. Use code blocks with language identifiers.
+5. Be encouraging and educational in tone.`
 }
-\`\`\`
 
-**Key takeaway:** Merge sort guarantees $O(n \\log n)$ in *all* cases, unlike quicksort which degrades to $O(n^2)$ in the worst case.`,
+async function buildCourseSystemPrompt(courseId: string): Promise<string> {
+  const course = await Course.findById(courseId).lean()
+  if (!course) return buildGeneralSystemPrompt()
 
-  `### The Rust Ownership Model
+  const lessons = await Lesson.find({ courseId }).sort({ orderIndex: 1 }).select('title').lean()
+  const lessonList = lessons.map((l, i) => `${i + 1}. ${l.title}`).join('\n')
 
-Rust's ownership system prevents memory bugs at compile time. The three rules are:
+  return `You are a course mentor for the SigmaLoop educational platform. You are helping a student with the following course:
 
-1. Each value has exactly **one owner**
-2. When the owner goes out of scope, the value is **dropped**
-3. You can have *either* one mutable reference \`&mut T\` *or* many immutable references \`&T\`
+**Course:** ${course.title}
+**Difficulty:** ${course.difficulty}
+**Description:** ${course.description}
 
-\`\`\`rust
-fn main() {
-    let s1 = String::from("hello");
-    let s2 = s1; // s1 is MOVED, no longer valid
+**Lessons in this course:**
+${lessonList}
 
-    // This won't compile:
-    // println!("{}", s1);
+---
 
-    // Use clone() for a deep copy:
-    let s3 = s2.clone();
-    println!("{} {}", s2, s3); // Both valid!
+Rules:
+1. Help the student understand the overall course structure and progression.
+2. Answer questions about which lesson covers what topic.
+3. Provide high-level explanations of course concepts.
+4. If a student asks detailed questions about specific lesson content, suggest they use the lesson-specific assistant.
+5. You may suggest a study path or order.
+6. Format your responses with Markdown. Use code blocks with language identifiers.
+7. Be encouraging and educational in tone.`
 }
-\`\`\`
 
-Think of it like passing a physical book — you can't read it after giving it away, unless you make a copy first!`
-]
-
-function getPlaceholderResponse(): string {
-  return PLACEHOLDER_RESPONSES[Math.floor(Math.random() * PLACEHOLDER_RESPONSES.length)]
-}
+// ──────────────────────────────────────────
+// Controllers
+// ──────────────────────────────────────────
 
 export const listThreads = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -211,11 +87,19 @@ export const listThreads = async (req: AuthRequest, res: Response): Promise<void
       return
     }
 
-    const threads = await ChatThread.find({ userId: req.user.id }).sort({ updatedAt: -1 }).lean()
+    const filter: Record<string, unknown> = { userId: req.user.id }
+
+    const { scope, scopeId } = req.query
+    if (scope) filter.scope = scope
+    if (scopeId) filter.scopeId = scopeId
+
+    const threads = await ChatThread.find(filter).sort({ updatedAt: -1 }).lean()
 
     const threadsData = threads.map(t => ({
       id: t._id.toString(),
       title: t.title,
+      scope: t.scope || ChatScope.GENERAL,
+      scopeId: t.scopeId?.toString() || null,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt
     }))
@@ -234,21 +118,37 @@ export const createThread = async (req: AuthRequest, res: Response): Promise<voi
       return
     }
 
-    const { title } = req.body
+    const { title, scope, scopeId } = req.body
     if (!title || !title.trim()) {
       res.status(400).json(error('Title is required', 'VALIDATION_ERROR'))
       return
     }
 
+    if (scope && !Object.values(ChatScope).includes(scope)) {
+      res.status(400).json(error('Invalid scope', 'VALIDATION_ERROR'))
+      return
+    }
+
+    if ((scope === ChatScope.LESSON || scope === ChatScope.COURSE) && !scopeId) {
+      res
+        .status(400)
+        .json(error('scopeId is required for LESSON and COURSE scopes', 'VALIDATION_ERROR'))
+      return
+    }
+
     const thread = await ChatThread.create({
       userId: req.user.id,
-      title: title.trim()
+      title: title.trim(),
+      scope: scope || ChatScope.GENERAL,
+      scopeId: scopeId || null
     })
 
     res.status(201).json(
       success({
         id: thread._id.toString(),
         title: thread.title,
+        scope: thread.scope,
+        scopeId: thread.scopeId?.toString() || null,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt
       })
@@ -318,8 +218,42 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
       content: content.trim()
     })
 
-    // Generate and save placeholder AI response
-    const aiResponse = getPlaceholderResponse()
+    // Generate AI response
+    if (!aiService.isConfigured()) {
+      res.status(503).json(error('AI service is not configured', AI_NOT_CONFIGURED))
+      return
+    }
+
+    // Build system prompt based on thread scope
+    let systemPrompt: string
+    switch (thread.scope) {
+      case ChatScope.LESSON:
+        systemPrompt = await buildLessonSystemPrompt(thread.scopeId!.toString())
+        break
+      case ChatScope.COURSE:
+        systemPrompt = await buildCourseSystemPrompt(thread.scopeId!.toString())
+        break
+      default:
+        systemPrompt = buildGeneralSystemPrompt()
+    }
+
+    // Fetch recent conversation history (last 20 messages)
+    const recentMessages = await ChatMessage.find({ threadId })
+      .sort({ createdAt: -1 })
+      .limit(21) // 20 + the user message we just saved
+      .lean()
+
+    const history: AIChatMessage[] = recentMessages
+      .reverse()
+      .slice(0, -1) // exclude the message we just saved
+      .map(m => ({
+        role: m.role === SenderRole.USER ? ('user' as const) : ('model' as const),
+        content: m.content
+      }))
+      .filter(m => m.role === 'user' || m.role === 'model')
+
+    const aiResponse = await aiService.generateChatResponse(systemPrompt, history, content.trim())
+
     const assistantMessage = await ChatMessage.create({
       threadId,
       role: SenderRole.ASSISTANT,
@@ -347,8 +281,10 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
       })
     )
   } catch (err) {
-    console.error('Send message error:', err)
-    res.status(500).json(error('Failed to send message', 'INTERNAL_ERROR'))
+    const msg = err instanceof Error ? err.message : 'Failed to send message'
+    console.error('Send message error:', msg)
+    const status = msg.includes('rate limit') ? 429 : 500
+    res.status(status).json(error(msg, status === 429 ? 'RATE_LIMITED' : 'AI_SERVICE_ERROR'))
   }
 }
 
@@ -407,6 +343,8 @@ export const updateThread = async (req: AuthRequest, res: Response): Promise<voi
       success({
         id: thread._id.toString(),
         title: thread.title,
+        scope: thread.scope,
+        scopeId: thread.scopeId?.toString() || null,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt
       })
