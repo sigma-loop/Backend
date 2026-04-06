@@ -16,6 +16,11 @@ export const config = {
       return process.env.JWT_SECRET || 'your-secret-key-change-in-production'
     })(),
     expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as string
+  },
+  ai: {
+    geminiApiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.AI_MODEL || 'gemini-2.5-flash',
+    maxTokens: parseInt(process.env.AI_MAX_TOKENS || '65536', 10)
   }
 }
 
