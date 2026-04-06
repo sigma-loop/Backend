@@ -123,6 +123,8 @@ export interface ISubmission extends Document {
 export interface IChatThread extends Document {
   userId: Types.ObjectId
   title: string
+  scope: 'GENERAL' | 'LESSON' | 'COURSE'
+  scopeId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
 }
