@@ -113,6 +113,44 @@ export const authenticate = async (
  * // Allow only ADMIN role
  * router.delete('/users/:id', authenticate, authorize('ADMIN'), deleteUser)
  */
+/**
+ * Optional authentication middleware — populates req.user if a valid token
+ * is present, but does NOT reject the request when the token is missing or
+ * invalid. Use this on public routes that return extra data for logged-in users.
+ */
+export const optionalAuthenticate = async (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7)
+      try {
+        const decoded = jwt.verify(token, config.jwt.secret) as {
+          id: string
+          email: string
+          role: string
+        }
+        const user = await User.findById(decoded.id)
+        if (user) {
+          req.user = {
+            id: decoded.id,
+            email: decoded.email,
+            role: decoded.role
+          }
+        }
+      } catch {
+        // Invalid token — proceed as unauthenticated
+      }
+    }
+  } catch {
+    // Ignore errors — proceed as unauthenticated
+  }
+  next()
+}
+
 export const authorize = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     if (!req.user) {

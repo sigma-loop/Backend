@@ -6,13 +6,13 @@ import {
   deleteChallenge,
   getChallengesByLesson
 } from '../controllers/challenge.controller'
-import { authenticate, authorize } from '../middlewares/auth.middleware'
+import { authenticate, optionalAuthenticate, authorize } from '../middlewares/auth.middleware'
 import { apiLimiter } from '../middlewares/rateLimit.middleware'
 
 const router = Router()
 
 // Public routes
-router.get('/:challengeId', apiLimiter, getChallengeById)
+router.get('/:challengeId', apiLimiter, optionalAuthenticate, getChallengeById)
 router.get('/lesson/:lessonId', apiLimiter, getChallengesByLesson)
 
 // Protected routes (admin/instructor only)
